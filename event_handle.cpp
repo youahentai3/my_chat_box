@@ -26,6 +26,7 @@ void add_fd(int epoll_fd,int fd)
     event.data.fd=fd;
     event.events=EPOLLIN | EPOLLET; //注册可读事件，设置ET模式
     epoll_ctl(epoll_fd,EPOLL_CTL_ADD,fd,&event);
+    set_nonblocking(fd); //将该文件描述符设置为非阻塞
 }
 
 //从epoll_fd标识的epoll事件表中删除所有fd所注册的事件并关闭fd
