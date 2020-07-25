@@ -19,6 +19,7 @@ public:
 private:
     pid_t pid;
     int pipefd[2];
+    int an_pipefd[2];
 };
 
 class Process_pool
@@ -33,9 +34,13 @@ private:
     int listen_fd;
     bool is_stop; //标识进程是否需要运行
     std::vector<Process> sub_process; //进程的描述信息
+    std::shared_ptr<Shared_mem> sh_m; //共享内存实例
     static std::unique_ptr<Process_pool> instance; //进程池的静态实例
 private:
     Process_pool(int _listen_fd,int _process_number=8);
+    void setup_sig_pipe();
+    void run_parent();
+    void run_child();
 public:
     static void create(int _listen_fd,int _process_number=8)
     {

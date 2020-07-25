@@ -3,11 +3,14 @@
 #include <signal.h>
 #include <iostream>
 #include <sys/wait.h>
+#include <netinet/in.h>
+#include <unordered_map>
 #include "process_pool.h"
 #include "event_handle.h"
-#include "User.h"
+#include "user.h"
+#include "shared_mem.h"
 
-Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen_fd),process_number(_process_number),index(-1)
+Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen_fd),process_number(_process_number),index(-1),sh_m(new Shared_mem(process_number,0))
 {
     assert(_process_number>0 && _process_number<=MAX_PROCESS_NUMBER);
 
@@ -20,6 +23,7 @@ Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen
         int ret=socketpair(PF_UNIX,SOCK_STREAM,0,sub_process[i].pipefd);
         assert(!ret);
         ret=socketpair(PF_UNIX,SOCK_STREAM,0,sub_process[i].an_pipefd);
+        assert(!ret);
 
         //创建子进程
         sub_process[i].pid=fork();
@@ -30,6 +34,7 @@ Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen
             //子进程
             close(sub_process[i].pipefd[0]); //子进程通过1读写，关闭另一个管道口
             index=i;
+            sh_m->set_ind(index); //设置共享内存序号
             break;
         }
         else 
@@ -66,7 +71,9 @@ void Process_pool::run_child()
 
     add_fd(epoll_fd,sub_process[index].pipefd[1]); //注册监听与父进程通信的管道口
     epoll_event events[MAX_EVENT_NUMBER];
-    std::unique_ptr<User[]> users(new User[USER_PER_PROCESS]);
+    User::init(sh_m,epoll_fd);
+    std::vector<User> users;
+    std::unordered_map<int,User> users_map;
     int number=0,ret=-1;
 
     while(is_stop)
@@ -99,7 +106,9 @@ void Process_pool::run_child()
                         continue;
                     }
                     add_fd(epoll_fd,connfd);
-                    users[connfd]->init();
+                    User user(connfd,client_address);
+                    users_map.insert(std::make_pair(connfd,user));
+                    //users[connfd]->init();
                 }
             }
             else if(sock_fd==sub_process[index].an_pipefd[1] && (events->events & EPOLLIN))
@@ -110,7 +119,7 @@ void Process_pool::run_child()
             {
                 int sig;
                 char signals[1024];
-                ret=recv(sig_pipe_fd[0],signals,sizeof(signals,0));
+                ret=recv(sig_pipe_fd[0],signals,sizeof(signals),0);
                 if(ret<=0)
                 {
                     continue;
@@ -119,7 +128,7 @@ void Process_pool::run_child()
                 {
                     for(int i=0;i<ret;i++)
                     {
-                        if(signals[i]==SIGCHLD);
+                        if(signals[i]==SIGCHLD)
                         {
                             pid_t t_pid;
                             int stat;
@@ -139,7 +148,7 @@ void Process_pool::run_child()
     }
 
     close(sub_process[index].an_pipefd[1]);
-    close(sub_process[index].pipefd);
+    close(sub_process[index].pipefd[1]);
     close(epoll_fd);
 }
 
