@@ -7,6 +7,7 @@
 #include <vector>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include "shared_mem.h"
 
 class Process_pool;
 

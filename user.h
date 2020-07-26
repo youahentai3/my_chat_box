@@ -19,7 +19,7 @@ public:
     User()=default;
     User(int sock_fd,const sockaddr_in& add);
     void recv_process();
-    void send_process();
+    void send_process(int id);
     static void init(std::shared_ptr<Shared_mem> sh,int ep_fd);
     ~User()=default;
 };

@@ -1,12 +1,15 @@
+#include <cstring>
 #include "user.h"
+#include "event_handle.h"
 
 User::User(int sock_fd,const sockaddr_in& add)
 {
     u_sock_fd=sock_fd;
     u_address=add;
+    u_read_index=0;
 }
 
-void User::init(Shared_mem* sh,int ep_fd)
+void User::init(std::shared_ptr<Shared_mem> sh,int ep_fd)
 {
     shm=sh;
     shm->reset();
@@ -15,8 +18,55 @@ void User::init(Shared_mem* sh,int ep_fd)
 
 //接收并处理客户端数据
 void User::recv_process()
-{}
+{
+    int ret=-1;
+    char buffer[Shared_mem::BUFFER_SIZE];
+
+    //因为是ET模式，所以需要一次性把该次读取事件所有的数据全部读取
+    while(true)
+    {
+        memset(buffer,0,Shared_mem::BUFFER_SIZE);
+        ret=recv(u_sock_fd,buffer+u_read_index,Shared_mem::BUFFER_SIZE-1-u_read_index,0);
+
+        if(ret<0)
+        {
+            //数据读取完毕
+            if(errno==EAGAIN || errno==EWOULDBLOCK)
+            {
+                break;
+            }
+            //暂时无数据可读，退出
+            //close(u_sock_fd);
+            break;
+        }
+        else if(ret==0)
+        {
+            //对方关闭连接
+            remove_fd(u_epoll_fd,u_sock_fd); //注销该socket
+            break;
+        }
+        else 
+        {
+            u_read_index+=ret;
+            if(u_read_index>=Shared_mem::BUFFER_SIZE)
+            {
+                shm->write_in(buffer);
+                u_read_index=0;
+            }
+        }
+    }
+    if(u_read_index)
+    {
+        shm->write_in(buffer);
+        u_read_index=0;
+    }
+}
 
 //向客户端发送信息
-void User::send_process()
-{}
+void User::send_process(int id)
+{
+    char buffer[Shared_mem::BUFFER_SIZE];
+
+    shm->read_out(id,buffer);
+    send(u_sock_fd,buffer,strlen(buffer)+1,0);
+}

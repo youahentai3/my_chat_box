@@ -3,7 +3,7 @@
 #include <cstring>
 #include "shared_mem.h"
 
-Shared_mem::Shared_mem(int num,int id):parts(num),ind(id)
+Shared_mem::Shared_mem(int num,int id):parts(num),ind(id),lock(new Rw_lock[num])
 {
     assert(num<=PROCESS_NUM_LIMIT);
     shm_fd=shm_open(shm_name,O_CREAT | O_RDWR,0666); //创建打开用于共享内存的文件
@@ -41,4 +41,19 @@ void Shared_mem::reset()
 {
     //将当前进程所对应的共享内存区域清空
     memset(shm_m+ind*BUFFER_SIZE,0,BUFFER_SIZE);
+}
+
+void Shared_mem::write_in(char* msg) //需保证msg是BUFFER_SIZE大小
+{
+    lock[ind].w_lock();
+    reset();
+    memcpy(shm_m,msg,BUFFER_SIZE);
+    lock[ind].w_unlock(parts);
+}
+
+void Shared_mem::read_out(int id,char* buffer) //buffer需是分配了空间的数组
+{
+    lock[ind].r_lock();
+    memcpy(buffer,shm_m+BUFFER_SIZE*ind,BUFFER_SIZE);
+    lock[ind].r_unlock();
 }

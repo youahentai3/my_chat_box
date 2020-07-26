@@ -33,6 +33,7 @@ Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen
         {
             //子进程
             close(sub_process[i].pipefd[0]); //子进程通过1读写，关闭另一个管道口
+            close(sub_process[i].an_pipefd[0]);
             index=i;
             sh_m->set_ind(index); //设置共享内存序号
             break;
@@ -41,6 +42,7 @@ Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen
         {
             //父进程
             close(sub_process[i].pipefd[1]); //父进程通过0读写，关闭另一个管道口
+            close(sub_process[i].an_pipefd[1]);
             continue;
         }
     }
@@ -143,6 +145,14 @@ void Process_pool::run_child()
                         }
                     }
                 }
+            }
+            else if(events[i].events & EPOLLIN)
+            {
+                //客户端数据到来
+                users_map[sock_fd].recv_process();
+                //发送通知给父进程，父进程负责把消息发给其余进程
+                int id=index;
+                send(sub_process[index].an_pipefd[1],(char*)&id,sizeof(id),0);
             }
         }
     }
@@ -251,8 +261,19 @@ void Process_pool::run_parent()
                     }
                 }
             }
-            else 
-            {}
+            else if(sock_fd==sub_process[i].an_pipefd[0] && (events->events & EPOLLIN))
+            {
+                //子进程有信息传来，表示接收到客户端信息
+                int id;
+                int ret=recv(sock_fd,(char*)&id,sizeof(id),0);
+                for(int i=0;i<process_number;i++)
+                {
+                    if(sub_process[i].pid!=-1)
+                    {
+                        send(sub_process[i].an_pipefd[0],(char*)id,sizeof(id),0);
+                    }
+                }
+            }
         }
     }
 
