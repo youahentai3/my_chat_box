@@ -61,7 +61,7 @@ void Shared_mem::write_in(char* msg) //需保证msg是BUFFER_SIZE大小
 
 void Shared_mem::read_out(int id,char* buffer) //buffer需是分配了空间的数组
 {
-    lock[ind].r_lock();
+    lock[id].r_lock();
     memcpy(buffer,shm_m+BUFFER_SIZE*id,BUFFER_SIZE);
-    lock[ind].r_unlock();
+    lock[id].r_unlock();
 }
