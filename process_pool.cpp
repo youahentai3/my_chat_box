@@ -5,15 +5,27 @@
 #include <sys/wait.h>
 #include <netinet/in.h>
 #include <unordered_map>
+#include <iostream>
 #include "process_pool.h"
 #include "event_handle.h"
 #include "user.h"
 #include "shared_mem.h"
 
+std::unique_ptr<Process_pool> Process_pool::instance=nullptr;
+
+void Process_pool::create(int _listen_fd,int _process_number=8)
+{
+    if(!instance)
+    {
+        instance.reset(new Process_pool(_listen_fd,_process_number));
+    }
+}
+
 Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen_fd),process_number(_process_number),index(-1),sh_m(new Shared_mem(process_number,0))
 {
     assert(_process_number>0 && _process_number<=MAX_PROCESS_NUMBER);
 
+    is_stop=false;
     //创建process_number个子进程
     for(int i=0;i<process_number;i++)
     {
@@ -36,6 +48,7 @@ Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen
             close(sub_process[i].an_pipefd[0]);
             index=i;
             sh_m->set_ind(index); //设置共享内存序号
+            sh_m->connect(); //映射共享内存到本地
             break;
         }
         else 
@@ -51,7 +64,7 @@ Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen
 //统一事件源
 void Process_pool::setup_sig_pipe()
 {
-    epoll_fd=epoll_create(5); //向内核申请创建epoll事件表
+    epoll_fd=epoll_create(20000); //向内核申请创建epoll事件表
     assert(epoll_fd!=-1);
 
     int ret=socketpair(PF_UNIX,SOCK_STREAM,0,sig_pipe_fd); //建立信号处理管道
@@ -72,13 +85,14 @@ void Process_pool::run_child()
     setup_sig_pipe(); //统一事件源并创建epoll时间表
 
     add_fd(epoll_fd,sub_process[index].pipefd[1]); //注册监听与父进程通信的管道口
+    add_fd(epoll_fd,sub_process[index].an_pipefd[1]);
     epoll_event events[MAX_EVENT_NUMBER];
     User::init(sh_m,epoll_fd);
     std::vector<User> users;
     std::unordered_map<int,User> users_map;
     int number=0,ret=-1;
 
-    while(is_stop)
+    while(!is_stop)
     {
         number=epoll_wait(epoll_fd,events,MAX_EVENT_NUMBER,-1);
         if(number<0 && errno!=EINTR) //EINTR表示epoll_wait被更高级的系统调用打断，可以重新调用
@@ -115,7 +129,21 @@ void Process_pool::run_child()
             }
             else if(sock_fd==sub_process[index].an_pipefd[1] && (events->events & EPOLLIN))
             {
-                ;
+                //有其他客户端消息需要发送;
+                int id;
+                int ret=recv(sub_process[index].an_pipefd[1],(char*)&id,sizeof(id),0);
+                std::cout<<id<<std::endl;
+                if(ret<=0)
+                    continue;
+                else 
+                {
+                    char buffer[Shared_mem::BUFFER_SIZE];
+                    sh_m->read_out(id,buffer);
+                    for(auto a : users_map)
+                    {
+                        a.second.send_process(buffer);
+                    }
+                }
             }
             else if(sock_fd==sig_pipe_fd[0] && (events->events & EPOLLIN)) //处理信号
             {
@@ -149,10 +177,29 @@ void Process_pool::run_child()
             else if(events[i].events & EPOLLIN)
             {
                 //客户端数据到来
-                users_map[sock_fd].recv_process();
+                User& us=users_map[sock_fd];
+                bool flag=us.recv_process();
+                if(!flag)
+                {
+                    if(!us.get_is_used())
+                        users_map.erase(sock_fd);
+                    continue;
+                }
                 //发送通知给父进程，父进程负责把消息发给其余进程
+                std::cout<<"dsfsf"<<std::endl;
                 int id=index;
                 send(sub_process[index].an_pipefd[1],(char*)&id,sizeof(id),0);
+
+                char buffer[Shared_mem::BUFFER_SIZE];
+                sh_m->read_out(index,buffer);
+                std::cout<<buffer;//<<std::endl;
+                for(auto a : users_map)
+                {
+                    if(a.first!=sock_fd)
+                        a.second.send_process(buffer);
+                }
+                if(!us.get_is_used())
+                    users_map.erase(sock_fd);
             }
         }
     }
@@ -167,6 +214,11 @@ void Process_pool::run_parent()
     setup_sig_pipe();
 
     add_fd(epoll_fd,listen_fd);
+    for(int i=0;i<process_number;i++)
+    {
+        add_fd(epoll_fd,sub_process[i].pipefd[0]); //注册监听与父进程通信的管道口
+        add_fd(epoll_fd,sub_process[i].an_pipefd[0]);
+    }
 
     epoll_event events[MAX_EVENT_NUMBER];
     int sub_process_counter=0;
@@ -183,6 +235,7 @@ void Process_pool::run_parent()
 
         for(int i=0;i<number;i++)
         {
+            std::cout<<"!!!"<<std::endl;
             int sock_fd=events[i].data.fd;
             int k=sub_process_counter;
             if(sock_fd==listen_fd)
@@ -261,16 +314,25 @@ void Process_pool::run_parent()
                     }
                 }
             }
-            else if(sock_fd==sub_process[i].an_pipefd[0] && (events->events & EPOLLIN))
+            else 
             {
-                //子进程有信息传来，表示接收到客户端信息
-                int id;
-                int ret=recv(sock_fd,(char*)&id,sizeof(id),0);
-                for(int i=0;i<process_number;i++)
+                std::cout<<"???"<<std::endl;
+                for(int j=0;j<process_number;j++)
                 {
-                    if(sub_process[i].pid!=-1)
+                    if(sock_fd==sub_process[j].an_pipefd[0] && (events->events & EPOLLIN))
                     {
-                        send(sub_process[i].an_pipefd[0],(char*)id,sizeof(id),0);
+                        //子进程有信息传来，表示接收到客户端信息
+                        int id;
+                        int ret=recv(sock_fd,(char*)&id,sizeof(id),0);
+                        std::cout<<id<<std::endl;
+                        for(int k=0;k<process_number;k++)
+                        {
+                            if(k!=id && sub_process[k].pid!=-1)
+                            {
+                                send(sub_process[k].an_pipefd[0],(char*)&id,sizeof(id),0);
+                            }
+                        }
+                        break;
                     }
                 }
             }
@@ -278,4 +340,17 @@ void Process_pool::run_parent()
     }
 
     close(epoll_fd);
+}
+
+void Process_pool::run()
+{
+    if(index!=-1)
+        run_child();
+    else 
+        run_parent();
+}
+
+void Process_pool::begin()
+{
+    instance->run();
 }

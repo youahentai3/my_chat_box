@@ -1,14 +1,21 @@
 #include <cassert>
 #include <unistd.h>
 #include <cstring>
+#include <sys/shm.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <iostream>
 #include "shared_mem.h"
+
+const char* Shared_mem::shm_name="/my_shm";
 
 Shared_mem::Shared_mem(int num,int id):parts(num),ind(id),lock(new Rw_lock[num])
 {
     assert(num<=PROCESS_NUM_LIMIT);
     shm_fd=shm_open(shm_name,O_CREAT | O_RDWR,0666); //创建打开用于共享内存的文件
     assert(shm_fd!=-1);
-    int ret=ftruncate(shm_fd,PROCESS_NUM_LIMIT*BUFFER_SIZE); //设置共享内存大小为进程数×缓存区大小
+    int ret=ftruncate(shm_fd,parts*BUFFER_SIZE); //设置共享内存大小为进程数×缓存区大小
     assert(ret!=-1);
 }
 
@@ -47,13 +54,14 @@ void Shared_mem::write_in(char* msg) //需保证msg是BUFFER_SIZE大小
 {
     lock[ind].w_lock();
     reset();
-    memcpy(shm_m,msg,BUFFER_SIZE);
+    //std::cout<<msg<<std::endl;
+    memcpy(shm_m+BUFFER_SIZE*ind,msg,BUFFER_SIZE);
     lock[ind].w_unlock(parts);
 }
 
 void Shared_mem::read_out(int id,char* buffer) //buffer需是分配了空间的数组
 {
     lock[ind].r_lock();
-    memcpy(buffer,shm_m+BUFFER_SIZE*ind,BUFFER_SIZE);
+    memcpy(buffer,shm_m+BUFFER_SIZE*id,BUFFER_SIZE);
     lock[ind].r_unlock();
 }

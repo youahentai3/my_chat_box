@@ -15,15 +15,15 @@ private:
     int u_sock_fd; //该用户的socket id
     sockaddr_in u_address; //该用户的socket地址
     int u_read_index;
+    bool is_used;
 public:
     User()=default;
     User(int sock_fd,const sockaddr_in& add);
-    void recv_process();
-    void send_process(int id);
+    bool recv_process();
+    void send_process(char* buffer);
+    bool get_is_used();
     static void init(std::shared_ptr<Shared_mem> sh,int ep_fd);
     ~User()=default;
 };
-std::shared_ptr<Shared_mem> User::shm=nullptr;
-int User::u_epoll_fd=-1;
 
 #endif

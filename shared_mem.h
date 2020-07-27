@@ -31,6 +31,5 @@ public:
     void write_in(char* msg);
     void read_out(int id,char* buffer);
 };
-const char* Shared_mem::shm_name="/my_shm";
 
 #endif

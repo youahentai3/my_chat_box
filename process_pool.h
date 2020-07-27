@@ -43,15 +43,10 @@ private:
     void run_parent();
     void run_child();
 public:
-    static void create(int _listen_fd,int _process_number=8)
-    {
-        if(!instance)
-        {
-            instance.reset(new Process_pool(_listen_fd,_process_number));
-        }
-    }
+    static void create(int _listen_fd,int _process_number);
+    static void begin();
+    void run();
     ~Process_pool()=default;
 };
-std::unique_ptr<Process_pool> Process_pool::instance=nullptr;
 
 #endif
