@@ -34,6 +34,7 @@ private:
     int epoll_fd; //epoll标识符
     int listen_fd;
     bool is_stop; //标识进程是否需要运行
+    int cou; //标识仍有多少个进程未读取信息
     std::vector<Process> sub_process; //进程的描述信息
     std::shared_ptr<Shared_mem> sh_m; //共享内存实例
     static std::unique_ptr<Process_pool> instance; //进程池的静态实例

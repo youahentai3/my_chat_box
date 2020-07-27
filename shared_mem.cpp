@@ -52,16 +52,19 @@ void Shared_mem::reset()
 
 void Shared_mem::write_in(char* msg) //需保证msg是BUFFER_SIZE大小
 {
-    lock[ind].w_lock();
+    //std::cout<<"1 "<<ind<<std::endl;
+    //lock[ind].w_lock();
     reset();
     //std::cout<<msg<<std::endl;
     memcpy(shm_m+BUFFER_SIZE*ind,msg,BUFFER_SIZE);
-    lock[ind].w_unlock(parts);
+    //std::cout<<"2"<<std::endl;
+    //lock[ind].w_unlock(parts);
+    //std::cout<<"3"<<std::endl;
 }
 
 void Shared_mem::read_out(int id,char* buffer) //buffer需是分配了空间的数组
 {
-    lock[id].r_lock();
+    //lock[id].r_lock();
     memcpy(buffer,shm_m+BUFFER_SIZE*id,BUFFER_SIZE);
-    lock[id].r_unlock();
+    //lock[id].r_unlock();
 }

@@ -21,7 +21,7 @@ void Process_pool::create(int _listen_fd,int _process_number=8)
     }
 }
 
-Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen_fd),process_number(_process_number),index(-1),sh_m(new Shared_mem(process_number,0))
+Process_pool::Process_pool(int _listen_fd,int _process_number):listen_fd(_listen_fd),process_number(_process_number),index(-1),sh_m(new Shared_mem(process_number,0)),cou(0)
 {
     assert(_process_number>0 && _process_number<=MAX_PROCESS_NUMBER);
 
@@ -132,16 +132,29 @@ void Process_pool::run_child()
                 //有其他客户端消息需要发送;
                 int id;
                 int ret=recv(sub_process[index].an_pipefd[1],(char*)&id,sizeof(id),0);
-                std::cout<<id<<std::endl;
+                //std::cout<<id<<std::endl;
                 if(ret<=0)
                     continue;
                 else 
                 {
-                    char buffer[Shared_mem::BUFFER_SIZE];
-                    sh_m->read_out(id,buffer);
-                    for(auto a : users_map)
+                    //std::cout<<id<<std::endl;
+                    if(id!=index)
                     {
-                        a.second.send_process(buffer);
+                        //id不等于自身id时表示有其他客户端信息可读
+                        char buffer[Shared_mem::BUFFER_SIZE];
+                        sh_m->read_out(id,buffer);
+                        for(auto a : users_map)
+                        {
+                            a.second.send_process(buffer);
+                        }
+                        //id=-1;
+                        send(sub_process[index].an_pipefd[1],(char*)&id,sizeof(id),0);
+                    }
+                    else 
+                    {
+                        //id为自身index表示有一个进程读取了信息
+                        cou--;
+                        //std::cout<<cou<<std::endl;
                     }
                 }
             }
@@ -177,6 +190,10 @@ void Process_pool::run_child()
             else if(events[i].events & EPOLLIN)
             {
                 //客户端数据到来
+                //若当前进程上一次的信息仍未被处理，暂停读取客户信息
+                if(cou)
+                    continue;
+
                 User& us=users_map[sock_fd];
                 bool flag=us.recv_process();
                 if(!flag)
@@ -186,20 +203,22 @@ void Process_pool::run_child()
                     continue;
                 }
                 //发送通知给父进程，父进程负责把消息发给其余进程
-                std::cout<<"dsfsf"<<std::endl;
-                int id=index;
+                //std::cout<<"dsfsf"<<std::endl;
+                int id=-1;
                 send(sub_process[index].an_pipefd[1],(char*)&id,sizeof(id),0);
+
+                cou=process_number-1;
 
                 char buffer[Shared_mem::BUFFER_SIZE];
                 sh_m->read_out(index,buffer);
-                std::cout<<buffer;//<<std::endl;
+                //std::cout<<buffer;//<<std::endl;
                 for(auto a : users_map)
                 {
                     if(a.first!=sock_fd)
                         a.second.send_process(buffer);
                 }
-                if(!us.get_is_used())
-                    users_map.erase(sock_fd);
+                //if(!us.get_is_used())
+                 //   users_map.erase(sock_fd);
             }
         }
     }
@@ -235,7 +254,7 @@ void Process_pool::run_parent()
 
         for(int i=0;i<number;i++)
         {
-            std::cout<<"!!!"<<std::endl;
+            //std::cout<<"!!!"<<std::endl;
             int sock_fd=events[i].data.fd;
             int k=sub_process_counter;
             if(sock_fd==listen_fd)
@@ -316,7 +335,7 @@ void Process_pool::run_parent()
             }
             else 
             {
-                std::cout<<"???"<<std::endl;
+                //std::cout<<"???"<<std::endl;
                 for(int j=0;j<process_number;j++)
                 {
                     if(sock_fd==sub_process[j].an_pipefd[0] && (events->events & EPOLLIN))
@@ -324,15 +343,24 @@ void Process_pool::run_parent()
                         //子进程有信息传来，表示接收到客户端信息
                         int id;
                         int ret=recv(sock_fd,(char*)&id,sizeof(id),0);
-                        std::cout<<id<<std::endl;
-                        for(int k=0;k<process_number;k++)
+                        if(ret<=0)
+                            continue;
+                        //std::cout<<id<<std::endl;
+                        if(id==-1)
                         {
-                            if(k!=id && sub_process[k].pid!=-1)
+                            id=j;
+                            for(int k=0;k<process_number;k++)
                             {
-                                send(sub_process[k].an_pipefd[0],(char*)&id,sizeof(id),0);
+                                if(k!=id && sub_process[k].pid!=-1)
+                                {
+                                    send(sub_process[k].an_pipefd[0],(char*)&id,sizeof(id),0);
+                                }
                             }
                         }
-                        break;
+                        else 
+                        {
+                            send(sub_process[id].an_pipefd[0],(char*)&id,sizeof(id),0);
+                        }
                     }
                 }
             }

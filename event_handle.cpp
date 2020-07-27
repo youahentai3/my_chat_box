@@ -24,7 +24,7 @@ void add_fd(int epoll_fd,int fd)
 {
     epoll_event event;
     event.data.fd=fd;
-    event.events=EPOLLIN | EPOLLET; //注册可读事件，设置ET模式
+    event.events=EPOLLIN; //注册可读事件，设置ET模式
     epoll_ctl(epoll_fd,EPOLL_CTL_ADD,fd,&event);
     set_nonblocking(fd); //将该文件描述符设置为非阻塞
 }

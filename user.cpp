@@ -32,8 +32,28 @@ bool User::recv_process()
     char cbuffer[Shared_mem::BUFFER_SIZE];
 
     memset(buffer,0,Shared_mem::BUFFER_SIZE);
+
+    //LT模式
+    ret=recv(u_sock_fd,buffer,Shared_mem::BUFFER_SIZE-1,0);
+    if(ret<0)
+        return false;
+    else if(ret==0)
+    {
+        //对方关闭连接
+        remove_fd(u_epoll_fd,u_sock_fd); //注销该socket
+        is_used=false;
+        return false;
+    }
+    else 
+    {
+        //正常接收到信息
+        shm->write_in(buffer);
+        u_read_index=0;
+        return true;
+    }
+
     //因为是ET模式，所以需要一次性把该次读取事件所有的数据全部读取
-    while(u_read_index<Shared_mem::BUFFER_SIZE)
+    /*while(u_read_index<Shared_mem::BUFFER_SIZE)
     {
         //memset(cbuffer,0,Shared_mem::BUFFER_SIZE);
         ret=recv(u_sock_fd,buffer+u_read_index,Shared_mem::BUFFER_SIZE-1-u_read_index,0);
@@ -68,7 +88,7 @@ bool User::recv_process()
         shm->write_in(buffer);
         u_read_index=0;
         return true;
-    }
+    }*/
     return false;
 }
 
