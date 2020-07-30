@@ -6,12 +6,13 @@
 std::shared_ptr<Shared_mem> User::shm=nullptr;
 int User::u_epoll_fd=-1;
 
-User::User(int sock_fd,const sockaddr_in& add)
+User::User(int sock_fd,const sockaddr_in& add):timer(new Heap_timer(DEFAULT_DELAY,this))
 {
     u_sock_fd=sock_fd;
     u_address=add;
     u_read_index=0;
     is_used=true;
+    status=true;
 }
 
 void User::init(std::shared_ptr<Shared_mem> sh,int ep_fd)
@@ -25,7 +26,7 @@ void User::init(std::shared_ptr<Shared_mem> sh,int ep_fd)
 bool User::recv_process()
 {
     if(!is_used)
-        return false;
+        return false; 
 
     int ret=-1;
     char buffer[Shared_mem::BUFFER_SIZE];
@@ -40,6 +41,7 @@ bool User::recv_process()
     else if(ret==0)
     {
         //对方关闭连接
+        std::cout<<"have closed"<<std::endl;
         remove_fd(u_epoll_fd,u_sock_fd); //注销该socket
         is_used=false;
         return false;
@@ -47,8 +49,17 @@ bool User::recv_process()
     else 
     {
         //正常接收到信息
-        shm->write_in(buffer);
-        u_read_index=0;
+        if(!status)
+        {
+            //std::cout<<"*****"<<std::endl;
+            status=true;
+        }
+        else 
+        {
+            timer->update_timer();
+            shm->write_in(buffer);
+            u_read_index=0;
+        }
         return true;
     }
 
@@ -95,8 +106,9 @@ bool User::recv_process()
 //向客户端发送信息
 void User::send_process(char* buffer)
 {
+    //std::cout<<status<<std::endl;
     //char buffer[Shared_mem::BUFFER_SIZE];
-    if(!is_used)
+    if(!is_used || !status)
         return;
    // shm->read_out(id,buffer);
     send(u_sock_fd,buffer,strlen(buffer)+1,0);
@@ -106,4 +118,18 @@ void User::send_process(char* buffer)
 bool User::get_is_used()
 {
     return is_used;
+}
+
+void User::ask_process()
+{
+    if(!is_used)
+        return;
+    //std::cout<<"status&&:  "<<status<<std::endl;
+    char ch=0;
+    send(u_sock_fd,&ch,sizeof(ch),MSG_OOB);
+}
+
+void User::set_timer(std::shared_ptr<Heap_timer> _timer)
+{
+    timer=_timer;
 }

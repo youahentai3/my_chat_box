@@ -77,6 +77,7 @@ void Process_pool::setup_sig_pipe()
     add_sig(SIGCHLD,sig_handler,true); //子进程退出或暂停
     add_sig(SIGTERM,sig_handler,true); //终止进程
     add_sig(SIGINT,sig_handler,true); //键盘输入中断
+    add_sig(SIGALRM,sig_handler,true); //时钟信号
     add_sig(SIGPIPE,SIG_IGN,true); //往读端被关闭的管道或socket连接中写数据，SIG_IGN表示忽略该信号
 }
 
@@ -91,6 +92,8 @@ void Process_pool::run_child()
     std::vector<User> users;
     std::unordered_map<int,User> users_map;
     int number=0,ret=-1;
+
+    alarm(time_heap.get_top_delay());
 
     while(!is_stop)
     {
@@ -124,6 +127,13 @@ void Process_pool::run_child()
                     add_fd(epoll_fd,connfd);
                     User user(connfd,client_address);
                     users_map.insert(std::make_pair(connfd,user));
+                    User& uss=users_map[connfd];
+                    std::shared_ptr<Heap_timer> tes(new Heap_timer(DEFAULT_DELAY,&uss));
+                    uss.set_timer(tes);
+                    //std::shared_ptr<Heap_timer> new_timer(new Heap_timer(DEFAULT_DELAY,&users_map[connfd]));
+                    time_heap.add_timer(users_map[connfd].timer);
+                    //users_map[connfd].timer->run_call_back();
+                    //std::cout<<users_map[connfd].status<<"((("<<std::endl; 
                     //users[connfd]->init();
                 }
             }
@@ -145,7 +155,8 @@ void Process_pool::run_child()
                         sh_m->read_out(id,buffer);
                         for(auto a : users_map)
                         {
-                            a.second.send_process(buffer);
+                            if(a.second.status)
+                                a.second.send_process(buffer);
                         }
                         //id=-1;
                         send(sub_process[index].an_pipefd[1],(char*)&id,sizeof(id),0);
@@ -184,6 +195,10 @@ void Process_pool::run_child()
                         {
                             is_stop=true;
                         }
+                        else if(signals[i]==SIGALRM)
+                        {
+                            time_heap.tick();
+                        }
                     }
                 }
             }
@@ -195,13 +210,26 @@ void Process_pool::run_child()
                     continue;
 
                 User& us=users_map[sock_fd];
+                int te_status=us.status;
+                //us.timer->update_timer();
                 bool flag=us.recv_process();
                 if(!flag)
                 {
                     if(!us.get_is_used())
+                    {
                         users_map.erase(sock_fd);
+                        time_heap.del_timer(us.timer);
+                    }
                     continue;
                 }
+
+                if(!te_status)
+                {
+                    us.timer->update_timer();
+                    time_heap.add_timer(us.timer);
+                    continue;
+                }
+
                 //发送通知给父进程，父进程负责把消息发给其余进程
                 //std::cout<<"dsfsf"<<std::endl;
                 int id=-1;
@@ -214,7 +242,7 @@ void Process_pool::run_child()
                 //std::cout<<buffer;//<<std::endl;
                 for(auto a : users_map)
                 {
-                    if(a.first!=sock_fd)
+                    if(a.first!=sock_fd && a.second.status)
                         a.second.send_process(buffer);
                 }
                 //if(!us.get_is_used())
@@ -354,6 +382,10 @@ void Process_pool::run_parent()
                                 if(k!=id && sub_process[k].pid!=-1)
                                 {
                                     send(sub_process[k].an_pipefd[0],(char*)&id,sizeof(id),0);
+                                }
+                                if(sub_process[k].pid==-1)
+                                {
+                                    send(sub_process[id].an_pipefd[0],(char*)&id,sizeof(id),0);
                                 }
                             }
                         }
